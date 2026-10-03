@@ -29,8 +29,8 @@ const SHARED_FOR = 4 * 60000
 
 // Compact shows once the context is filling up
 const COMPACT_FROM = 60
-const REFRESH = '🔄'
-const REFRESHING = '⏳'
+const REFRESH = '↻'
+const REFRESHING = '⋯'
 
 type Shared = { at: number; limits: Limit[] }
 

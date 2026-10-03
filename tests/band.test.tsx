@@ -118,7 +118,7 @@ test('English band', async ($, on) => {
       expect(await ui.find({ type: 'Text', text })).toBeDefined()
     }
     expect(await ui.find({ key: 'compact' })).toBeUndefined()
-    expect((await ui.find({ key: 'refresh' }))?.props.label).toBe('🔄')
+    expect((await ui.find({ key: 'refresh' }))?.props.label).toBe('↻')
     await ui.unmount()
   }
 })
@@ -133,7 +133,7 @@ test('Korean from the Claude Code language setting', async ($, on) => {
       expect(await ui.find({ type: 'Text', text })).toBeDefined()
     }
     expect(await ui.find({ key: 'compact' })).toBeUndefined()
-    expect((await ui.find({ key: 'refresh' }))?.props.label).toBe('🔄')
+    expect((await ui.find({ key: 'refresh' }))?.props.label).toBe('↻')
     await ui.unmount()
   }
 })
