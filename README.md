@@ -3,17 +3,15 @@
 Keeps the figures of the Claude desktop app's usage popover on screen, right above the Claude Code prompt, in the desktop app's Code tab and in the terminal, without hovering.
 
 ```
-Session 5% / resets in 3h 4m   Weekly · All models 2% / resets Sat 8:00 AM   Weekly · Fable 0% / resets Sat 8:00 AM   Context 22% / 220k of 1M   🔄
-
-세션 한도 13% / 1시간 3분 후 재설정        주간 · 모든 모델 4% / 토 오전 8:00 재설정   [압축] 🔄
-주간 · Fable 0% / 토 오전 8:00 재설정      컨텍스트 65% / 1M 중 650k
+Session 13% 1h3m   Weekly 4% 6d14h   Fable 0% 6d14h   Context 50%   🔄
+세션 13% 1h3m   주간 4% 6d14h   Fable 0% 6d14h   컨텍스트 65%   [압축] 🔄
 ```
 
-- **Session / Weekly**: how much of each limit is used (yellow from 70%, red from 90%) and when it resets. The 5-hour session counts down; the weekly limits name the day and time. A limit whose reset time has passed shows `reset` until the next reading.
-- **Per-model weeks** such as Weekly · Fable (which ones depends on your plan) come from a background `claude -p /usage` run, the same figures as the usage popover. See [How it refreshes](#how-it-refreshes).
+- **Session / Weekly**: how much of each limit is used (yellow from 70%, red from 90%) and how long until it resets, as `1h3m` or `6d14h`. A limit whose reset time has passed shows `reset` until the next reading.
+- **Per-model weeks** such as Fable (which ones depends on your plan) come from a background `claude -p /usage` run, the same figures as the usage popover. See [How it refreshes](#how-it-refreshes).
 - **Context**: how full the context window is, as Claude Code's status line counts it, so it can differ from the popover. **Compact**, shown from 60%, runs `/compact`.
 - **🔄** reads `/usage` at once and shows ⏳ while it runs.
-- On a narrower band the readings line up in two columns, then one, and the buttons keep the right edge.
+- The band always takes one line: when it is narrow the times give way to the percents alone, and past that the line is cut with `…`. The buttons keep the right edge.
 - **Language**: English or Korean, picked automatically. See [Options](#options).
 
 ## Install
@@ -119,7 +117,7 @@ Claude 데스크톱 앱 사용량 팝업의 내용(세션 한도, 주간 · 모�
 
 **문제 해결**: `claude plugin list`에 `usage-band@inline`이 loaded로 보여야 합니다. 안 보이면 `settings.json`이 올바른 JSON인지 확인하세요. 앞 줄 끝의 쉼표가 빠지거나 Windows 경로의 `\`를 한 번만 쓰면 파일 전체가 깨집니다. `claude --debug`에 function hooks가 꺼져 있어 모듈을 불러오지 않았다고 나오면, 같은 `env`에 `"CLAUDE_CODE_ENABLE_FUNCTION_HOOKS": "1"`을 추가하고 재시작하세요. 모델별 줄이 안 보이면, `claude -p /usage`는 요금제에 있는 한도만 `Current week (…)` 줄로 출력하고 API 키 로그인에는 출력하지 않습니다. 🔄 버튼으로 `/usage`를 읽지 못하면 알림이 뜹니다.
 
-**참고**: 컨텍스트 수치는 Claude Code 상태줄 기준이라 팝업 숫자와 다를 수 있습니다. 재설정 시각이 지난 한도는 다음에 읽을 때까지 `재설정됨`으로 표시합니다. 압축 버튼은 컨텍스트가 60% 이상일 때만 보입니다. 바가 좁으면 항목이 같은 너비의 2열, 더 좁으면 1열로 정렬되고, 버튼은 오른쪽 끝에 고정됩니다.
+**참고**: 컨텍스트 수치는 Claude Code 상태줄 기준이라 팝업 숫자와 다를 수 있습니다. 재설정 시각이 지난 한도는 다음에 읽을 때까지 `재설정됨`으로 표시합니다. 압축 버튼은 컨텍스트가 60% 이상일 때만 보입니다. 바는 항상 한 줄입니다. 폭이 좁으면 남은 시간을 빼고 사용률만 보여 주고, 그래도 넘치면 줄 끝을 `…`로 자릅니다. 버튼은 오른쪽 끝에 고정됩니다.
 
 ## Development
 
