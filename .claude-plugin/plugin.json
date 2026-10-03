@@ -1,0 +1,23 @@
+{
+  "name": "usage-band",
+  "version": "0.2.0",
+  "description": "Always shows the 5-hour, weekly and context usage above the Claude Code prompt",
+  "author": {
+    "name": "dydtjr1128"
+  },
+  "repository": "https://github.com/dydtjr1128/claude-desktop-usage-band",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "auto follows Claude Code's language setting, then the system locale",
+      "default": "auto",
+      "options": [
+        "auto",
+        "en",
+        "ko"
+      ]
+    }
+  }
+}

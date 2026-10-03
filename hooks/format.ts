@@ -1,0 +1,105 @@
+import type { Context, Lang, Limit } from '../types'
+
+const HOUR = 3600000
+const DAY = 24 * HOUR
+
+const TEXT = {
+  en: {
+    fiveHour: '5h',
+    weekly: 'Weekly',
+    spend: 'Spend',
+    context: 'Context',
+    compact: 'Compact',
+    elapsed: (p: number) => `${p}% elapsed`,
+    resetsIn: (d: string) => `↻ in ${d}`,
+    resetting: '↻ now',
+    units: ['d', 'h', 'm'],
+  },
+  ko: {
+    fiveHour: '5시간',
+    weekly: '주간',
+    spend: '사용 한도',
+    context: '컨텍스트',
+    compact: '압축',
+    elapsed: (p: number) => `${p}% 경과`,
+    resetsIn: (d: string) => `↻ ${d} 후`,
+    resetting: '↻ 곧',
+    units: ['일', '시간', '분'],
+  },
+} as const
+
+export const t = (lang: Lang) => TEXT[lang]
+
+export function isKorean(value: string): boolean {
+  return /^ko([-_.]|$)|korean|한국|한글/i.test(value.trim())
+}
+
+export function windowMs(kind: string): number | undefined {
+  if (kind === 'five_hour') return 5 * HOUR
+  if (kind.startsWith('seven_day')) return 7 * DAY
+  return undefined
+}
+
+export function label(kind: string, lang: Lang): string {
+  const s = t(lang)
+  if (kind === 'five_hour') return s.fiveHour
+  if (kind === 'seven_day') return s.weekly
+  if (kind === 'spend_limit') return s.spend
+  const model = /^seven_day_(.+)$/.exec(kind)?.[1]
+  if (model) return `${s.weekly} · ${model.charAt(0).toUpperCase()}${model.slice(1)}`
+  return kind
+}
+
+export function duration(ms: number, lang: Lang): string {
+  const [d, h, m] = t(lang).units
+  const total = Math.max(0, Math.floor(ms / 60000))
+  const days = Math.floor(total / 1440)
+  const hours = Math.floor((total % 1440) / 60)
+  const mins = total % 60
+  if (days > 0) return `${days}${d} ${hours}${h} ${mins}${m}`
+  if (hours > 0) return `${hours}${h} ${mins}${m}`
+  return `${mins}${m}`
+}
+
+// "(74% elapsed; ↻ in 1h 16m)" / "(74% 경과; ↻ 1시간 16분 후)"
+export function detail(limit: Limit, now: number, lang: Lang): string | undefined {
+  if (!limit.resetsAt) return undefined
+  const s = t(lang)
+  const left = Date.parse(limit.resetsAt) - now
+  if (Number.isNaN(left)) return undefined
+  const reset = left > 0 ? s.resetsIn(duration(left, lang)) : s.resetting
+  const span = windowMs(limit.kind)
+  if (span === undefined) return `(${reset})`
+  const elapsed = Math.min(100, Math.max(0, Math.round(((span - Math.max(0, left)) / span) * 100)))
+  return `(${s.elapsed(elapsed)}; ${reset})`
+}
+
+export function tokens(n: number): string {
+  if (n >= 1000000) return `${Number((n / 1000000).toFixed(1))}M`
+  if (n >= 1000) return `${Math.round(n / 1000)}k`
+  return String(n)
+}
+
+export function contextPercent(context: Context): number | undefined {
+  if (context.percent !== undefined) return Math.round(context.percent)
+  if (context.tokens !== undefined && context.window > 0) {
+    return Math.round((context.tokens / context.window) * 100)
+  }
+  return undefined
+}
+
+export function contextDetail(context: Context): string | undefined {
+  if (context.tokens === undefined) return undefined
+  return `${tokens(context.tokens)}/${tokens(context.window)}`
+}
+
+export function tone(percent: number): string | undefined {
+  if (percent >= 90) return 'red'
+  if (percent >= 70) return 'yellow'
+  return undefined
+}
+
+export function order(limits: Limit[]): Limit[] {
+  const rank = (k: string) => (k === 'five_hour' ? 0 : k === 'seven_day' ? 1 : 2)
+  return [...limits].sort((a, b) => rank(a.kind) - rank(b.kind) || a.kind.localeCompare(b.kind))
+}
