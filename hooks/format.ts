@@ -12,7 +12,10 @@ const TEXT = {
     compact: 'Compact',
     elapsed: (p: number) => `${p}% elapsed`,
     resetsIn: (d: string) => `↻ in ${d}`,
-    expired: 'reset · updates on next reply',
+    expired: 'reset',
+    refresh: 'Refresh',
+    refreshing: 'Refreshing…',
+    refreshFailed: 'Could not read /usage',
     units: ['d', 'h', 'm'],
   },
   ko: {
@@ -23,7 +26,10 @@ const TEXT = {
     compact: '압축',
     elapsed: (p: number) => `${p}% 경과`,
     resetsIn: (d: string) => `↻ ${d} 후`,
-    expired: '재설정됨 · 다음 응답 때 갱신',
+    expired: '재설정됨',
+    refresh: '새로고침',
+    refreshing: '새로고침 중…',
+    refreshFailed: '/usage를 읽지 못했습니다',
     units: ['일', '시간', '분'],
   },
 } as const
@@ -110,4 +116,16 @@ export function tone(percent: number): string | undefined {
 export function order(limits: Limit[]): Limit[] {
   const rank = (k: string) => (k === 'five_hour' ? 0 : k === 'seven_day' ? 1 : 2)
   return [...limits].sort((a, b) => rank(a.kind) - rank(b.kind) || a.kind.localeCompare(b.kind))
+}
+
+// The engine's readings carry exact reset times; /usage adds the per-model
+// weeks and keeps the percents current between replies
+export function merge(engine: readonly Limit[], plan: readonly Limit[], now: number): Limit[] {
+  const byKind = new Map(plan.map(limit => [limit.kind, limit] as const))
+  for (const limit of engine) {
+    const other = byKind.get(limit.kind)
+    if (!other || (limit.at ?? 0) >= (other.at ?? 0)) byKind.set(limit.kind, limit)
+    else if (limit.resetsAt && !isExpired(limit, now)) byKind.set(limit.kind, { ...other, resetsAt: limit.resetsAt })
+  }
+  return order([...byKind.values()])
 }

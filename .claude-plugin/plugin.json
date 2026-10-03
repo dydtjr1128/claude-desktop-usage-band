@@ -1,6 +1,6 @@
 {
   "name": "usage-band",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Always shows the 5-hour, weekly and context usage above the Claude Code prompt",
   "author": {
     "name": "dydtjr1128"
@@ -17,6 +17,17 @@
         "auto",
         "en",
         "ko"
+      ]
+    },
+    "refresh": {
+      "type": "string",
+      "title": "Usage refresh",
+      "description": "How often a background claude -p /usage reads the per-model weekly limits; off reads them only when you press Refresh",
+      "default": "5m",
+      "options": [
+        "5m",
+        "15m",
+        "off"
       ]
     }
   }

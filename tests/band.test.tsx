@@ -2,7 +2,8 @@ import { describe as group, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On, RenderPropsOf } from 'claude-code'
 
-import { detail, duration, isExpired, isKorean, tokens } from '../hooks/format'
+import { detail, duration, isExpired, isKorean, merge, tokens } from '../hooks/format'
+import { parseReset, parseUsage } from '../hooks/usage'
 
 const NOW = Date.parse('2026-10-03T05:00:00Z')
 const MIN = 60000
@@ -10,6 +11,16 @@ const MIN = 60000
 const FIVE_HOUR = { kind: 'five_hour', percentUsed: 21, resetsAt: new Date(NOW + 76 * MIN + 59000).toISOString() }
 const WEEKLY = { kind: 'seven_day', percentUsed: 3, resetsAt: new Date(NOW + (6 * 1440 + 2 * 60 + 56) * MIN + 59000).toISOString() }
 const CONTEXT = { tokens: 112000, window: 1000000, percent: 11.2 }
+// What `claude -p /usage` printed, word for word
+const USAGE = [
+  'You are currently using your subscription to power your Claude Code usage',
+  '',
+  'Current session: 6% used · resets Oct 3, 6:29pm (Asia/Seoul)',
+  'Current week (all models): 3% used · resets Oct 10, 7:59am (Asia/Seoul)',
+  'Current week (Fable): 0% used · resets Oct 10, 8am (Asia/Seoul)',
+  '',
+  "What's contributing to your limits usage?",
+].join('\n')
 const PROPS = {
   hasSurvey: false,
   isWorking: false,
@@ -19,12 +30,29 @@ const PROPS = {
   view: {},
 } satisfies RenderPropsOf['AbovePrompt']
 
-function engine(on: On, settings: { language?: string; env?: Record<string, string> } = {}) {
-  mock.clock(on, { now: NOW })
-  mock.env(on, settings.env ?? {})
+type World = {
+  language?: string
+  env?: Record<string, string>
+  store?: Record<string, unknown>
+  usage?: { exitCode: number; stdout: string }
+}
+
+function engine(on: On, world: World = {}) {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, world.env ?? {})
+  mock.store(on, world.store)
+  const runs: (readonly string[])[] = []
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('session.attach', (_$, e) => ({ clientId: e.clientId }))
+  on('session.surfaces', () => ({ value: ['terminal'] as const }))
   on('session.usage', () => ({ value: { startedAt: NOW, context: CONTEXT, rateLimits: [WEEKLY, FIVE_HOUR] } }))
-  on('settings.read', () => ({ value: settings.language ? { language: settings.language } : {} }))
+  on('settings.read', () => ({ value: world.language ? { language: world.language } : {} }))
+  on('process.run', (_$, e) => {
+    runs.push(e.argv)
+    const { exitCode, stdout } = world.usage ?? { exitCode: 0, stdout: USAGE }
+    return { value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  return { clock, runs }
 }
 
 function band($: Engine, surface: 'terminal' | 'desktop', isWorking = false) {
@@ -169,9 +197,105 @@ test('a window past its reset drops the stale percent', async ($, on) => {
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await band($, surface)
     expect(await ui.find({ type: 'Text', text: '5h' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: 'reset · updates on next reply' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'reset' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: '92%' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: '(13% elapsed; ↻ in 6d 2h 56m)' })).toBeDefined()
     await ui.unmount()
   }
+})
+
+group('/usage', () => {
+  test('reads the windows it prints', () => {
+    const local = (day: number, hour: number, minute = 0) => new Date(2026, 9, day, hour, minute).toISOString()
+    expect(parseUsage(USAGE, NOW)).toEqual([
+      { kind: 'five_hour', percentUsed: 6, resetsAt: local(3, 18, 30), at: NOW },
+      { kind: 'seven_day', percentUsed: 3, resetsAt: local(10, 8), at: NOW },
+      { kind: 'seven_day_fable', percentUsed: 0, resetsAt: local(10, 8), at: NOW },
+    ])
+    expect(parseUsage('Usage is not available for API keys', NOW)).toEqual([])
+  })
+  test('reset times', () => {
+    const noon = new Date(2026, 9, 3, 12).getTime()
+    expect(parseReset('Oct 3, 6:29pm', noon)).toBe(new Date(2026, 9, 3, 18, 30).toISOString())
+    // a time with no date that has passed is tomorrow's
+    expect(parseReset('9am', noon)).toBe(new Date(2026, 9, 4, 9).toISOString())
+    // December's "Jan 2" is next year's
+    expect(parseReset('Jan 2, 8am', new Date(2026, 11, 30, 12).getTime())).toBe(new Date(2027, 0, 2, 8).toISOString())
+    expect(parseReset('soon', noon)).toBeUndefined()
+  })
+  test('the newer percent wins, with the exact reset time of the engine', () => {
+    const later = { kind: 'five_hour', percentUsed: 25, resetsAt: new Date(NOW + 77 * MIN).toISOString(), at: NOW }
+    const older = { kind: 'seven_day', percentUsed: 2, resetsAt: WEEKLY.resetsAt, at: NOW - MIN }
+    const fable = { kind: 'seven_day_fable', percentUsed: 0, resetsAt: WEEKLY.resetsAt, at: NOW }
+    const merged = merge([{ ...FIVE_HOUR, at: NOW - MIN }, { ...WEEKLY, at: NOW }], [later, older, fable], NOW)
+    expect(merged).toEqual([{ ...later, resetsAt: FIVE_HOUR.resetsAt }, { ...WEEKLY, at: NOW }, fable])
+  })
+})
+
+test('a terminal session reads /usage at the start and every 5 minutes', async ($, on) => {
+  const { clock, runs } = engine(on, { env: { LANG: 'en_US.UTF-8' } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(runs.length).toBe(1)
+  expect(runs[0].slice(1, 3)).toEqual(['-p', '/usage'])
+  const ui = await band($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: 'Weekly · Fable' })).toBeDefined()
+  await ui.unmount()
+  await clock.advance(5 * MIN)
+  expect(runs.length).toBe(2)
+})
+
+test('a session nobody looks at never runs /usage', async ($, on) => {
+  const { clock, runs } = engine(on)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await clock.advance(15 * MIN)
+  expect(runs.length).toBe(0)
+})
+
+test('the desktop app attaching starts the reads', async ($, on) => {
+  const { clock, runs } = engine(on)
+  await $.session.start({ cwd: '/', surface: null, isInteractive: false })
+  await $.session.attach({ surface: 'desktop', clientId: 'desktop:default' })
+  await clock.settle()
+  expect(runs.length).toBe(1)
+})
+
+test('the /usage child stays idle', async ($, on) => {
+  const { clock, runs } = engine(on, { env: { USAGE_BAND_CHILD: '1' } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(runs.length).toBe(0)
+})
+
+test('off reads only on Refresh', { options: { refresh: 'off' } }, async ($, on) => {
+  const { clock, runs } = engine(on, { env: { LANG: 'en_US.UTF-8' } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(20 * MIN)
+  expect(runs.length).toBe(0)
+  const ui = await band($, 'desktop')
+  await ui.press({ key: 'refresh' })
+  expect(runs.length).toBe(1)
+  expect(await ui.find({ type: 'Text', text: 'Weekly · Fable' })).toBeDefined()
+  await ui.unmount()
+})
+
+test("another session's fresh reading is reused", async ($, on) => {
+  const fable = { kind: 'seven_day_fable', percentUsed: 4, resetsAt: WEEKLY.resetsAt, at: NOW - MIN }
+  const { clock, runs } = engine(on, { env: { LANG: 'en_US.UTF-8' }, store: { plan: { at: NOW - MIN, limits: [fable] } } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(runs.length).toBe(0)
+  const ui = await band($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: '4%' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a failed /usage leaves the engine readings', async ($, on) => {
+  const { clock } = engine(on, { env: { LANG: 'en_US.UTF-8' }, usage: { exitCode: 1, stdout: '' } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await band($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: '21%' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Weekly · Fable' })).toBeUndefined()
+  await ui.unmount()
 })
