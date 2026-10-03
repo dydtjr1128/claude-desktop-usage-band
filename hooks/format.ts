@@ -1,36 +1,39 @@
 import type { Context, Lang, Limit } from '../types'
 
-const HOUR = 3600000
-const DAY = 24 * HOUR
-
 const TEXT = {
   en: {
-    fiveHour: '5h',
-    weekly: 'Weekly',
+    session: 'Session',
+    weekly: 'Weekly · All models',
+    weeklyFor: (model: string) => `Weekly · ${model}`,
     spend: 'Spend',
     context: 'Context',
+    of: (used: string, total: string) => `${used} of ${total}`,
     compact: 'Compact',
-    elapsed: (p: number) => `${p}% elapsed`,
-    resetsIn: (d: string) => `↻ in ${d}`,
-    expired: 'reset',
     refresh: 'Refresh',
     refreshing: 'Refreshing…',
     refreshFailed: 'Could not read /usage',
+    resetsIn: (left: string) => `resets in ${left}`,
+    resetsOn: (when: string) => `resets ${when}`,
+    expired: 'reset',
     units: ['d', 'h', 'm'],
+    locale: 'en-US',
   },
   ko: {
-    fiveHour: '5시간',
-    weekly: '주간',
+    session: '세션 한도',
+    weekly: '주간 · 모든 모델',
+    weeklyFor: (model: string) => `주간 · ${model}`,
     spend: '사용 한도',
     context: '컨텍스트',
+    of: (used: string, total: string) => `${total} 중 ${used}`,
     compact: '압축',
-    elapsed: (p: number) => `${p}% 경과`,
-    resetsIn: (d: string) => `↻ ${d} 후`,
-    expired: '재설정됨',
     refresh: '새로고침',
     refreshing: '새로고침 중…',
     refreshFailed: '/usage를 읽지 못했습니다',
+    resetsIn: (left: string) => `${left} 후 재설정`,
+    resetsOn: (when: string) => `${when} 재설정`,
+    expired: '재설정됨',
     units: ['일', '시간', '분'],
+    locale: 'ko-KR',
   },
 } as const
 
@@ -40,19 +43,13 @@ export function isKorean(value: string): boolean {
   return /^ko([-_.]|$)|korean|한국|한글/i.test(value.trim())
 }
 
-export function windowMs(kind: string): number | undefined {
-  if (kind === 'five_hour') return 5 * HOUR
-  if (kind.startsWith('seven_day')) return 7 * DAY
-  return undefined
-}
-
 export function label(kind: string, lang: Lang): string {
   const s = t(lang)
-  if (kind === 'five_hour') return s.fiveHour
+  if (kind === 'five_hour') return s.session
   if (kind === 'seven_day') return s.weekly
   if (kind === 'spend_limit') return s.spend
   const model = /^seven_day_(.+)$/.exec(kind)?.[1]
-  if (model) return `${s.weekly} · ${model.charAt(0).toUpperCase()}${model.slice(1)}`
+  if (model) return s.weeklyFor(`${model.charAt(0).toUpperCase()}${model.slice(1)}`)
   return kind
 }
 
@@ -67,6 +64,16 @@ export function duration(ms: number, lang: Lang): string {
   return `${mins}${m}`
 }
 
+// "Sat 8:00 AM" / "토 오전 8:00", in the machine's time zone
+export function day(at: number, lang: Lang): string {
+  const { locale } = t(lang)
+  const date = new Date(at)
+  const weekday = new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(date)
+  const time = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(date)
+  // Newer ICU puts a narrow no-break space before AM/PM
+  return `${weekday} ${time}`.replace(/\s/g, ' ')
+}
+
 // The window has reset since the last reading, so its percent is stale
 export function isExpired(limit: Limit, now: number): boolean {
   if (!limit.resetsAt) return false
@@ -74,17 +81,13 @@ export function isExpired(limit: Limit, now: number): boolean {
   return !Number.isNaN(at) && at <= now
 }
 
-// "(74% elapsed; ↻ in 1h 16m)" / "(74% 경과; ↻ 1시간 16분 후)"
-export function detail(limit: Limit, now: number, lang: Lang): string | undefined {
+// The 5-hour window counts down; the weekly ones name the day, as the app's popover does
+export function resetText(limit: Limit, now: number, lang: Lang): string | undefined {
   if (!limit.resetsAt) return undefined
+  const at = Date.parse(limit.resetsAt)
+  if (Number.isNaN(at) || at <= now) return undefined
   const s = t(lang)
-  const left = Date.parse(limit.resetsAt) - now
-  if (Number.isNaN(left) || left <= 0) return undefined
-  const reset = s.resetsIn(duration(left, lang))
-  const span = windowMs(limit.kind)
-  if (span === undefined) return `(${reset})`
-  const elapsed = Math.min(100, Math.max(0, Math.round(((span - left) / span) * 100)))
-  return `(${s.elapsed(elapsed)}; ${reset})`
+  return limit.kind === 'five_hour' ? s.resetsIn(duration(at - now, lang)) : s.resetsOn(day(at, lang))
 }
 
 export function tokens(n: number): string {
@@ -101,9 +104,10 @@ export function contextPercent(context: Context): number | undefined {
   return undefined
 }
 
-export function contextDetail(context: Context): string | undefined {
+// "112k of 1M" / "1M 중 112k"
+export function contextDetail(context: Context, lang: Lang): string | undefined {
   if (context.tokens === undefined) return undefined
-  return `${tokens(context.tokens)}/${tokens(context.window)}`
+  return t(lang).of(tokens(context.tokens), tokens(context.window))
 }
 
 // Theme keys, so the colors stay readable on light and dark themes

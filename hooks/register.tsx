@@ -5,11 +5,11 @@ import type { Context, Lang, Limit } from '../types'
 import {
   contextDetail,
   contextPercent,
-  detail,
   isExpired,
   isKorean,
   label,
   merge,
+  resetText,
   t,
   tone,
 } from './format'
@@ -170,51 +170,50 @@ export const register: Register = (on, options) => {
 
     const l = await read($, lang)
     const s = t(l)
+    const ctxDetail = ctx ? contextDetail(ctx, l) : undefined
     const { Box, Button, Text } = $.ui.resolve(e)
 
+    // The readings wrap on the left; the buttons keep the right edge
     return (
-      <Box flexDirection="row" flexWrap="wrap" columnGap={3} alignItems="center">
-        {current.map(limit => {
-          if (isExpired(limit, at)) {
+      <Box flexDirection="row" alignItems="center" columnGap={3}>
+        <Box flexDirection="row" flexWrap="wrap" flexGrow={1} columnGap={3} alignItems="center">
+          {current.map(limit => {
+            const expired = isExpired(limit, at)
+            const pct = Math.round(limit.percentUsed)
+            const when = expired ? s.expired : resetText(limit, at, l)
             return (
               <Box key={limit.kind} flexDirection="row" columnGap={1}>
                 <Text>{label(limit.kind, l)}</Text>
-                <Text dimColor>{s.expired}</Text>
+                {expired ? null : <Text bold color={tone(pct)}>{`${pct}%`}</Text>}
+                {when ? <Text dimColor>{`/ ${when}`}</Text> : null}
               </Box>
             )
-          }
-          const pct = Math.round(limit.percentUsed)
-          const more = detail(limit, at, l)
-          return (
-            <Box key={limit.kind} flexDirection="row" columnGap={1}>
-              <Text>{label(limit.kind, l)}</Text>
-              <Text bold color={tone(pct)}>{`${pct}%`}</Text>
-              {more ? <Text dimColor>{more}</Text> : null}
+          })}
+          {ctxPercent !== undefined ? (
+            <Box key="context" flexDirection="row" columnGap={1}>
+              <Text>{s.context}</Text>
+              <Text bold color={tone(ctxPercent)}>{`${ctxPercent}%`}</Text>
+              {ctxDetail ? <Text dimColor>{`/ ${ctxDetail}`}</Text> : null}
             </Box>
-          )
-        })}
-        {ctx && ctxPercent !== undefined ? (
-          <Box key="context" flexDirection="row" columnGap={1} alignItems="center">
-            <Text>{s.context}</Text>
-            <Text bold color={tone(ctxPercent)}>{`${ctxPercent}%`}</Text>
-            {contextDetail(ctx) ? <Text dimColor>{contextDetail(ctx)}</Text> : null}
-            {e.props.isWorking ? null : (
-              <Button
-                key="compact"
-                label={s.compact}
-                onPress={async () => {
-                  // Rejects when a turn starts between the draw and the press
-                  try {
-                    await $.session.compact()
-                  } catch (err) {
-                    $.ui.toast(err instanceof Error ? err.message : String(err))
-                  }
-                }}
-              />
-            )}
-          </Box>
-        ) : null}
-        <Button key="refresh" label={busy ? s.refreshing : s.refresh} onPress={() => refresh($, true)} />
+          ) : null}
+        </Box>
+        <Box key="actions" flexDirection="row" flexShrink={0} columnGap={1}>
+          {ctxPercent === undefined || e.props.isWorking ? null : (
+            <Button
+              key="compact"
+              label={s.compact}
+              onPress={async () => {
+                // Rejects when a turn starts between the draw and the press
+                try {
+                  await $.session.compact()
+                } catch (err) {
+                  $.ui.toast(err instanceof Error ? err.message : String(err))
+                }
+              }}
+            />
+          )}
+          <Button key="refresh" label={busy ? s.refreshing : s.refresh} onPress={() => refresh($, true)} />
+        </Box>
       </Box>
     )
   })
