@@ -31,7 +31,7 @@ Session 5% / resets in 3h 4m   Weekly · All models 2% / resets Sat 8:00 AM   We
    ```json
    {
      "env": {
-       "CLAUDE_CODE_PLUGIN_DIRS": "C:\Users\you\claude-desktop-usage-band"
+       "CLAUDE_CODE_PLUGIN_DIRS": "C:\\Users\\you\\claude-desktop-usage-band"
      }
    }
    ```
@@ -94,12 +94,12 @@ Claude 데스크톱 앱 사용량 팝업의 내용(세션 한도, 주간 · 모�
    git clone https://github.com/dydtjr1128/claude-desktop-usage-band.git
    ```
 
-2. `~/.claude/settings.json`(Windows: `%USERPROFILE%\.claude\settings.json`)의 `env`에 클론한 폴더의 절대 경로를 넣습니다. 이미 `env` 블록이 있으면 그 안에 한 줄만 추가하세요. Windows 경로는 `\`를 `\`로 두 번 써야 합니다.
+2. `~/.claude/settings.json`(Windows: `%USERPROFILE%\.claude\settings.json`)의 `env`에 클론한 폴더의 절대 경로를 넣습니다. 이미 `env` 블록이 있으면 그 안에 한 줄만 추가하세요. Windows 경로는 `\`를 `\\`로 두 번 써야 합니다.
 
    ```json
    {
      "env": {
-       "CLAUDE_CODE_PLUGIN_DIRS": "C:\Users\사용자\claude-desktop-usage-band"
+       "CLAUDE_CODE_PLUGIN_DIRS": "C:\\Users\\사용자\\claude-desktop-usage-band"
      }
    }
    ```
