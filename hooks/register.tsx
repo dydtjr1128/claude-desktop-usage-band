@@ -4,15 +4,13 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Context, Lang, Limit, Reading } from '../types'
 import {
   cells,
-  columns,
-  contextDetail,
   contextPercent,
   isExpired,
   isKorean,
   label,
+  lineCells,
   merge,
   resetText,
-  span,
   t,
   tone,
 } from './format'
@@ -178,52 +176,40 @@ export const register: Register = (on, options) => {
 
     const l = await read($, lang)
     const s = t(l)
-    const ctxDetail = ctx ? contextDetail(ctx, l) : undefined
     const readings: Reading[] = current.map(limit => {
-      const expired = isExpired(limit, at)
-      const when = expired ? s.expired : resetText(limit, at, l)
-      return {
-        key: limit.kind,
-        name: label(limit.kind, l),
-        percent: expired ? undefined : Math.round(limit.percentUsed),
-        detail: when ? `/ ${when}` : undefined,
-      }
+      const name = label(limit.kind, l)
+      if (isExpired(limit, at)) return { key: limit.kind, name, detail: s.expired }
+      return { key: limit.kind, name, percent: Math.round(limit.percentUsed), detail: resetText(limit, at) }
     })
-    if (ctxPercent !== undefined) {
-      readings.push({ key: 'context', name: s.context, percent: ctxPercent, detail: ctxDetail ? `/ ${ctxDetail}` : undefined })
-    }
+    if (ctxPercent !== undefined) readings.push({ key: 'context', name: s.context, percent: ctxPercent })
     const compact = ctxPercent !== undefined && ctxPercent >= COMPACT_FROM && !e.props.isWorking
-    // The buttons and the gaps around them come off the band's width
-    const room = e.props.bodyColumns - (compact ? cells(s.compact) + 5 : 0) - cells(REFRESH) - 3
-    const cols = columns(readings.map(span), room)
-    const perRow = cols || Math.max(1, readings.length)
-    const rows: Reading[][] = []
-    for (let i = 0; i < readings.length; i += perRow) rows.push(readings.slice(i, i + perRow))
+    // The buttons and the gap before them come off the band's width
+    const room = e.props.bodyColumns - (compact ? cells(s.compact) + 5 : 0) - cells(REFRESH) - 2
+    // Too narrow for the times: the percents alone, and past that the line is cut
+    const line =
+      lineCells(readings) <= room
+        ? readings
+        : readings.map(reading => (reading.percent === undefined ? reading : { ...reading, detail: undefined }))
     const { Box, Button, Text } = $.ui.resolve(e)
 
-    // One row when everything fits, else equal columns so that wrapped rows
-    // line up; the buttons keep the right edge either way
+    // Always one line: the readings on the left, the buttons at the right edge
     return (
-      <Box flexDirection="row" alignItems="center" columnGap={3}>
-        <Box flexDirection="column" flexGrow={1}>
-          {rows.map((row, i) => (
-            <Box key={`row-${i}`} flexDirection="row" flexWrap="wrap" columnGap={cols ? 0 : 3}>
-              {row.map(reading => (
-                <Box
-                  key={reading.key}
-                  flexDirection="row"
-                  columnGap={1}
-                  {...(cols ? { width: `${100 / cols}%`, paddingRight: 3 } : {})}
-                >
-                  <Text>{reading.name}</Text>
-                  {reading.percent === undefined ? null : (
-                    <Text bold color={tone(reading.percent)}>{`${reading.percent}%`}</Text>
-                  )}
-                  {reading.detail ? <Text dimColor>{reading.detail}</Text> : null}
-                </Box>
-              ))}
-            </Box>
-          ))}
+      <Box flexDirection="row" alignItems="center" columnGap={2}>
+        <Box flexGrow={1} flexShrink={1}>
+          <Text wrap="truncate-end">
+            {line.map((reading, i) => (
+              <Text key={reading.key}>
+                {i > 0 ? '   ' : null}
+                <Text>{reading.name}</Text>
+                {reading.percent === undefined ? null : ' '}
+                {reading.percent === undefined ? null : (
+                  <Text bold color={tone(reading.percent)}>{`${reading.percent}%`}</Text>
+                )}
+                {reading.detail ? ' ' : null}
+                {reading.detail ? <Text dimColor>{reading.detail}</Text> : null}
+              </Text>
+            ))}
+          </Text>
         </Box>
         <Box key="actions" flexDirection="row" flexShrink={0} columnGap={1}>
           {compact ? (

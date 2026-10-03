@@ -2,7 +2,7 @@ import { describe as group, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On, RenderPropsOf } from 'claude-code'
 
-import { cells, columns, day, duration, isExpired, isKorean, merge, resetText, span, tokens } from '../hooks/format'
+import { cells, duration, isExpired, isKorean, lineCells, merge, resetText, span } from '../hooks/format'
 import { parseReset, parseUsage } from '../hooks/usage'
 
 const NOW = Date.parse('2026-10-03T05:00:00Z')
@@ -10,8 +10,6 @@ const MIN = 60000
 // 1h 16m 59s and 6d 2h 56m 59s left
 const FIVE_HOUR = { kind: 'five_hour', percentUsed: 21, resetsAt: new Date(NOW + 76 * MIN + 59000).toISOString() }
 const WEEKLY = { kind: 'seven_day', percentUsed: 3, resetsAt: new Date(NOW + (6 * 1440 + 2 * 60 + 56) * MIN + 59000).toISOString() }
-const WEEKLY_EN = `/ resets ${day(Date.parse(WEEKLY.resetsAt), 'en')}`
-const WEEKLY_KO = `/ ${day(Date.parse(WEEKLY.resetsAt), 'ko')} 재설정`
 const CONTEXT = { tokens: 112000, window: 1000000, percent: 11.2 }
 // What `claude -p /usage` printed, word for word
 const USAGE = [
@@ -69,45 +67,35 @@ function band($: Engine, surface: 'terminal' | 'desktop', isWorking = false, bod
 
 group('format', () => {
   test('durations', () => {
-    expect(duration(76 * MIN + 59000, 'en')).toBe('1h 16m')
-    expect(duration((6 * 1440 + 2 * 60 + 56) * MIN, 'ko')).toBe('6일 2시간 56분')
-    expect(duration(5 * MIN, 'ko')).toBe('5분')
+    expect(duration(76 * MIN + 59000)).toBe('1h16m')
+    expect(duration((6 * 1440 + 2 * 60 + 56) * MIN)).toBe('6d2h')
+    expect(duration(5 * MIN)).toBe('5m')
   })
   test('reset texts', () => {
-    expect(resetText(FIVE_HOUR, NOW, 'en')).toBe('resets in 1h 16m')
-    expect(resetText(FIVE_HOUR, NOW, 'ko')).toBe('1시간 16분 후 재설정')
-    expect(resetText({ kind: 'spend_limit', percentUsed: 5 }, NOW, 'en')).toBeUndefined()
-  })
-  test('weekly resets name the day', () => {
-    // a Saturday, 8 in the morning, in the machine's own time zone
-    const saturday = new Date(2026, 9, 10, 8).getTime()
-    expect(day(saturday, 'en')).toBe('Sat 8:00 AM')
-    expect(day(saturday, 'ko')).toBe('토 오전 8:00')
+    expect(resetText(FIVE_HOUR, NOW)).toBe('1h16m')
+    expect(resetText(WEEKLY, NOW)).toBe('6d2h')
+    expect(resetText({ kind: 'spend_limit', percentUsed: 5 }, NOW)).toBeUndefined()
   })
   test('a window past its reset time is expired', () => {
     const past = { kind: 'five_hour', percentUsed: 92, resetsAt: new Date(NOW - MIN).toISOString() }
     expect(isExpired(past, NOW)).toBe(true)
     expect(isExpired(FIVE_HOUR, NOW)).toBe(false)
     expect(isExpired({ kind: 'spend_limit', percentUsed: 5 }, NOW)).toBe(false)
-    expect(resetText(past, NOW, 'en')).toBeUndefined()
-  })
-  test('token counts', () => {
-    expect(tokens(112000)).toBe('112k')
-    expect(tokens(1000000)).toBe('1M')
-    expect(tokens(200000)).toBe('200k')
+    expect(resetText(past, NOW)).toBeUndefined()
   })
   test('cells and spans', () => {
     expect(cells('Session')).toBe(7)
     expect(cells('세션 한도')).toBe(9)
     expect(cells('🔄')).toBe(2)
-    expect(span({ key: 'five_hour', name: 'Session', percent: 21, detail: '/ resets in 1h 16m' })).toBe(30)
+    expect(span({ key: 'five_hour', name: 'Session', percent: 21, detail: '1h16m' })).toBe(17)
     expect(span({ key: 'five_hour', name: 'Session' })).toBe(7)
   })
-  test('columns', () => {
-    expect(columns([30, 43, 38, 24], 160)).toBe(0)
-    expect(columns([30, 43, 38, 24], 100)).toBe(2)
-    expect(columns([30, 43, 38, 24], 60)).toBe(1)
-    expect(columns([], 40)).toBe(0)
+  test('line cells', () => {
+    expect(lineCells([
+      { key: 'five_hour', name: 'Session', percent: 21, detail: '1h16m' },
+      { key: 'seven_day', name: 'Weekly', percent: 3 },
+    ])).toBe(29)
+    expect(lineCells([])).toBe(0)
   })
   test('korean detection', () => {
     expect(isKorean('ko_KR.UTF-8')).toBe(true)
@@ -126,7 +114,7 @@ test('English band', async ($, on) => {
   await clock.settle()
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await band($, surface)
-    for (const text of ['Session', '21%', '/ resets in 1h 16m', 'Weekly · All models', '3%', WEEKLY_EN, 'Weekly · Fable', 'Context', '11%', '/ 112k of 1M']) {
+    for (const text of ['Session', '21%', '1h16m', 'Weekly', '3%', '6d2h', 'Fable', '0%', 'Context', '11%']) {
       expect(await ui.find({ type: 'Text', text })).toBeDefined()
     }
     expect(await ui.find({ key: 'compact' })).toBeUndefined()
@@ -141,7 +129,7 @@ test('Korean from the Claude Code language setting', async ($, on) => {
   await clock.settle()
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await band($, surface)
-    for (const text of ['세션 한도', '/ 1시간 16분 후 재설정', '주간 · 모든 모델', WEEKLY_KO, '주간 · Fable', '컨텍스트', '/ 1M 중 112k']) {
+    for (const text of ['세션', '1h16m', '주간', '6d2h', 'Fable', '컨텍스트']) {
       expect(await ui.find({ type: 'Text', text })).toBeDefined()
     }
     expect(await ui.find({ key: 'compact' })).toBeUndefined()
@@ -154,7 +142,7 @@ test('Korean from the system locale', async ($, on) => {
   engine(on, { env: { LANG: 'ko_KR.UTF-8' } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await band($, 'desktop')
-  expect(await ui.find({ type: 'Text', text: '세션 한도' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '세션' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -170,7 +158,7 @@ test('Korean can be forced', { options: { language: 'ko' } }, async ($, on) => {
   engine(on, { env: { LANG: 'en_US.UTF-8' } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await band($, 'desktop')
-  expect(await ui.find({ type: 'Text', text: '세션 한도' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '세션' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -193,17 +181,19 @@ test('Compact shows from 60% context, and hides while a turn runs', async ($, on
   expect(compacted).toBe(2)
 })
 
-test('the readings line up in columns when the band is narrow', async ($, on) => {
+test('one line at any width: the times give way first, then the line is cut', async ($, on) => {
   const { clock } = engine(on, { env: { LANG: 'en_US.UTF-8' } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await clock.settle()
   for (const surface of ['terminal', 'desktop'] as const) {
-    for (const [bodyColumns, width] of [[200, undefined], [100, '50%'], [60, '100%']] as const) {
-      const ui = await band($, surface, false, bodyColumns)
-      expect((await ui.find({ key: 'five_hour' }))?.props.width).toBe(width)
-      expect((await ui.find({ key: 'context' }))?.props.width).toBe(width)
-      await ui.unmount()
-    }
+    const wide = await band($, surface, false, 120)
+    expect(await wide.find({ type: 'Text', text: '1h16m' })).toBeDefined()
+    await wide.unmount()
+    const narrow = await band($, surface, false, 40)
+    expect((await narrow.find({ type: 'Text' }))?.props.wrap).toBe('truncate-end')
+    expect(await narrow.find({ type: 'Text', text: '1h16m' })).toBeUndefined()
+    expect(await narrow.find({ type: 'Text', text: '21%' })).toBeDefined()
+    await narrow.unmount()
   }
 })
 
@@ -218,9 +208,9 @@ test('a measurement redraws the band on screen', async ($, on) => {
     rateLimits: [{ ...FIVE_HOUR, percentUsed: 92 }],
     changed: ['rateLimits', 'context'],
   })
-  const pct = await ui.find({ type: 'Text', text: '92%' })
+  const pct = await ui.find({ type: 'Text', text: /^92%$/ })
   expect(pct?.props.color).toBe('error')
-  expect(await ui.find({ type: 'Text', text: '/ 500k of 1M' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '50%' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -237,9 +227,9 @@ test('a window past its reset drops the stale percent', async ($, on) => {
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await band($, surface)
     expect(await ui.find({ type: 'Text', text: 'Session' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: '/ reset' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'reset' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: '92%' })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: WEEKLY_EN })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '6d2h' })).toBeDefined()
     await ui.unmount()
   }
 })
@@ -279,7 +269,7 @@ test('a terminal session reads /usage at the start and every 5 minutes', async (
   expect(runs.length).toBe(1)
   expect(runs[0].slice(1, 3)).toEqual(['-p', '/usage'])
   const ui = await band($, 'terminal')
-  expect(await ui.find({ type: 'Text', text: 'Weekly · Fable' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Fable' })).toBeDefined()
   await ui.unmount()
   await clock.advance(5 * MIN)
   expect(runs.length).toBe(2)
@@ -315,7 +305,7 @@ test('off reads only on Refresh', { options: { refresh: 'off' } }, async ($, on)
   const ui = await band($, 'desktop')
   await ui.press({ key: 'refresh' })
   expect(runs.length).toBe(1)
-  expect(await ui.find({ type: 'Text', text: 'Weekly · Fable' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Fable' })).toBeDefined()
   await ui.unmount()
 })
 

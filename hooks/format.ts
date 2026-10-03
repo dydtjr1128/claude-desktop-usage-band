@@ -3,33 +3,21 @@ import type { Context, Lang, Limit, Reading } from '../types'
 const TEXT = {
   en: {
     session: 'Session',
-    weekly: 'Weekly · All models',
-    weeklyFor: (model: string) => `Weekly · ${model}`,
+    weekly: 'Weekly',
     spend: 'Spend',
     context: 'Context',
-    of: (used: string, total: string) => `${used} of ${total}`,
     compact: 'Compact',
     refreshFailed: 'Could not read /usage',
-    resetsIn: (left: string) => `resets in ${left}`,
-    resetsOn: (when: string) => `resets ${when}`,
     expired: 'reset',
-    units: ['d', 'h', 'm'],
-    locale: 'en-US',
   },
   ko: {
-    session: '세션 한도',
-    weekly: '주간 · 모든 모델',
-    weeklyFor: (model: string) => `주간 · ${model}`,
-    spend: '사용 한도',
+    session: '세션',
+    weekly: '주간',
+    spend: '지출',
     context: '컨텍스트',
-    of: (used: string, total: string) => `${total} 중 ${used}`,
     compact: '압축',
     refreshFailed: '/usage를 읽지 못했습니다',
-    resetsIn: (left: string) => `${left} 후 재설정`,
-    resetsOn: (when: string) => `${when} 재설정`,
     expired: '재설정됨',
-    units: ['일', '시간', '분'],
-    locale: 'ko-KR',
   },
 } as const
 
@@ -45,29 +33,19 @@ export function label(kind: string, lang: Lang): string {
   if (kind === 'seven_day') return s.weekly
   if (kind === 'spend_limit') return s.spend
   const model = /^seven_day_(.+)$/.exec(kind)?.[1]
-  if (model) return s.weeklyFor(`${model.charAt(0).toUpperCase()}${model.slice(1)}`)
+  if (model) return `${model.charAt(0).toUpperCase()}${model.slice(1)}`
   return kind
 }
 
-export function duration(ms: number, lang: Lang): string {
-  const [d, h, m] = t(lang).units
+// "1h3m", "6d14h", "45m"
+export function duration(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 60000))
   const days = Math.floor(total / 1440)
   const hours = Math.floor((total % 1440) / 60)
   const mins = total % 60
-  if (days > 0) return `${days}${d} ${hours}${h} ${mins}${m}`
-  if (hours > 0) return `${hours}${h} ${mins}${m}`
-  return `${mins}${m}`
-}
-
-// "Sat 8:00 AM" / "토 오전 8:00", in the machine's time zone
-export function day(at: number, lang: Lang): string {
-  const { locale } = t(lang)
-  const date = new Date(at)
-  const weekday = new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(date)
-  const time = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(date)
-  // Newer ICU puts a narrow no-break space before AM/PM
-  return `${weekday} ${time}`.replace(/\s/g, ' ')
+  if (days > 0) return `${days}d${hours}h`
+  if (hours > 0) return `${hours}h${mins}m`
+  return `${mins}m`
 }
 
 // The window has reset since the last reading, so its percent is stale
@@ -77,19 +55,12 @@ export function isExpired(limit: Limit, now: number): boolean {
   return !Number.isNaN(at) && at <= now
 }
 
-// The 5-hour window counts down; the weekly ones name the day, as the app's popover does
-export function resetText(limit: Limit, now: number, lang: Lang): string | undefined {
+// Time left until the window resets, as "1h3m" or "6d14h"
+export function resetText(limit: Limit, now: number): string | undefined {
   if (!limit.resetsAt) return undefined
   const at = Date.parse(limit.resetsAt)
   if (Number.isNaN(at) || at <= now) return undefined
-  const s = t(lang)
-  return limit.kind === 'five_hour' ? s.resetsIn(duration(at - now, lang)) : s.resetsOn(day(at, lang))
-}
-
-export function tokens(n: number): string {
-  if (n >= 1000000) return `${Number((n / 1000000).toFixed(1))}M`
-  if (n >= 1000) return `${Math.round(n / 1000)}k`
-  return String(n)
+  return duration(at - now)
 }
 
 export function contextPercent(context: Context): number | undefined {
@@ -98,12 +69,6 @@ export function contextPercent(context: Context): number | undefined {
     return Math.round((context.tokens / context.window) * 100)
   }
   return undefined
-}
-
-// "112k of 1M" / "1M 중 112k"
-export function contextDetail(context: Context, lang: Lang): string | undefined {
-  if (context.tokens === undefined) return undefined
-  return t(lang).of(tokens(context.tokens), tokens(context.window))
 }
 
 const WIDE = /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7A3\uF900-\uFAFF\uFF00-\uFF60\uFFE0-\uFFE6]|\p{Extended_Pictographic}/u
@@ -123,12 +88,9 @@ export function span(reading: Reading): number {
   return parts.reduce((sum, part) => sum + cells(part), parts.length - 1)
 }
 
-// How the readings sit on the band so that rows which wrap still line up:
-// 0 when all of them fit in one row, else how many equal columns, two or one
-export function columns(widths: readonly number[], room: number): number {
-  const total = widths.reduce((sum, w) => sum + w, 0) + 3 * Math.max(0, widths.length - 1)
-  if (total <= room) return 0
-  return Math.max(...widths) * 2 + 6 <= room ? 2 : 1
+// Cells a line of readings takes, three cells apart
+export function lineCells(readings: readonly Reading[]): number {
+  return readings.reduce((sum, reading) => sum + span(reading), 0) + 3 * Math.max(0, readings.length - 1)
 }
 
 // Theme keys, so the colors stay readable on light and dark themes
