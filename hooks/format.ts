@@ -1,4 +1,4 @@
-import type { Context, Lang, Limit } from '../types'
+import type { Context, Lang, Limit, Reading } from '../types'
 
 const TEXT = {
   en: {
@@ -9,8 +9,6 @@ const TEXT = {
     context: 'Context',
     of: (used: string, total: string) => `${used} of ${total}`,
     compact: 'Compact',
-    refresh: 'Refresh',
-    refreshing: 'Refreshing…',
     refreshFailed: 'Could not read /usage',
     resetsIn: (left: string) => `resets in ${left}`,
     resetsOn: (when: string) => `resets ${when}`,
@@ -26,8 +24,6 @@ const TEXT = {
     context: '컨텍스트',
     of: (used: string, total: string) => `${total} 중 ${used}`,
     compact: '압축',
-    refresh: '새로고침',
-    refreshing: '새로고침 중…',
     refreshFailed: '/usage를 읽지 못했습니다',
     resetsIn: (left: string) => `${left} 후 재설정`,
     resetsOn: (when: string) => `${when} 재설정`,
@@ -108,6 +104,31 @@ export function contextPercent(context: Context): number | undefined {
 export function contextDetail(context: Context, lang: Lang): string | undefined {
   if (context.tokens === undefined) return undefined
   return t(lang).of(tokens(context.tokens), tokens(context.window))
+}
+
+const WIDE = /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7A3\uF900-\uFAFF\uFF00-\uFF60\uFFE0-\uFFE6]|\p{Extended_Pictographic}/u
+
+// Cells a text takes on the band: Hangul, CJK and emoji take two
+export function cells(text: string): number {
+  let n = 0
+  for (const ch of text) n += WIDE.test(ch) ? 2 : 1
+  return n
+}
+
+// The cells a reading takes: name, percent and detail, one cell apart
+export function span(reading: Reading): number {
+  const parts = [reading.name]
+  if (reading.percent !== undefined) parts.push(`${reading.percent}%`)
+  if (reading.detail) parts.push(reading.detail)
+  return parts.reduce((sum, part) => sum + cells(part), parts.length - 1)
+}
+
+// How the readings sit on the band so that rows which wrap still line up:
+// 0 when all of them fit in one row, else how many equal columns, two or one
+export function columns(widths: readonly number[], room: number): number {
+  const total = widths.reduce((sum, w) => sum + w, 0) + 3 * Math.max(0, widths.length - 1)
+  if (total <= room) return 0
+  return Math.max(...widths) * 2 + 6 <= room ? 2 : 1
 }
 
 // Theme keys, so the colors stay readable on light and dark themes
