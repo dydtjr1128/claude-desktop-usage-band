@@ -6,6 +6,7 @@ import {
   contextDetail,
   contextPercent,
   detail,
+  isExpired,
   isKorean,
   label,
   order,
@@ -23,9 +24,9 @@ const now = atom({ plugin: 'usage-band', key: 'now' } as const, 0)
 async function detectLang($: EngineInterface, preference: unknown): Promise<Lang> {
   if (preference === 'en' || preference === 'ko') return preference
   try {
-    const row = (await $.config.list()).find(r => r.key === 'language')
-    if (typeof row?.value === 'string' && row.value && !row.value.startsWith('Default')) {
-      return isKorean(row.value) ? 'ko' : 'en'
+    const { language } = await $.settings.read()
+    if (typeof language === 'string' && language.trim()) {
+      return isKorean(language) ? 'ko' : 'en'
     }
   } catch {}
   const locale =
@@ -87,6 +88,14 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="row" flexWrap="wrap" columnGap={3} alignItems="center">
         {current.map(limit => {
+          if (isExpired(limit, at)) {
+            return (
+              <Box key={limit.kind} flexDirection="row" columnGap={1}>
+                <Text>{label(limit.kind, l)}</Text>
+                <Text dimColor>{s.expired}</Text>
+              </Box>
+            )
+          }
           const pct = Math.round(limit.percentUsed)
           const more = detail(limit, at, l)
           return (
@@ -103,7 +112,18 @@ export const register: Register = (on, options) => {
             <Text bold color={tone(ctxPercent)}>{`${ctxPercent}%`}</Text>
             {contextDetail(ctx) ? <Text dimColor>{contextDetail(ctx)}</Text> : null}
             {e.props.isWorking ? null : (
-              <Button key="compact" label={s.compact} onPress={() => void $.session.compact()} />
+              <Button
+                key="compact"
+                label={s.compact}
+                onPress={async () => {
+                  // Rejects when a turn starts between the draw and the press
+                  try {
+                    await $.session.compact()
+                  } catch (err) {
+                    $.ui.toast(err instanceof Error ? err.message : String(err))
+                  }
+                }}
+              />
             )}
           </Box>
         ) : null}
