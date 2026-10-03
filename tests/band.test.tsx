@@ -2,7 +2,7 @@ import { describe as group, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On, RenderPropsOf } from 'claude-code'
 
-import { day, duration, isExpired, isKorean, merge, resetText, tokens } from '../hooks/format'
+import { cells, columns, day, duration, isExpired, isKorean, merge, resetText, span, tokens } from '../hooks/format'
 import { parseReset, parseUsage } from '../hooks/usage'
 
 const NOW = Date.parse('2026-10-03T05:00:00Z')
@@ -34,6 +34,7 @@ const PROPS = {
 
 type World = {
   language?: string
+  context?: { tokens?: number; window: number; percent?: number }
   env?: Record<string, string>
   store?: Record<string, unknown>
   usage?: { exitCode: number; stdout: string }
@@ -47,7 +48,7 @@ function engine(on: On, world: World = {}) {
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.attach', (_$, e) => ({ clientId: e.clientId }))
   on('session.surfaces', () => ({ value: ['terminal'] as const }))
-  on('session.usage', () => ({ value: { startedAt: NOW, context: CONTEXT, rateLimits: [WEEKLY, FIVE_HOUR] } }))
+  on('session.usage', () => ({ value: { startedAt: NOW, context: world.context ?? CONTEXT, rateLimits: [WEEKLY, FIVE_HOUR] } }))
   on('settings.read', () => ({ value: world.language ? { language: world.language } : {} }))
   on('process.run', (_$, e) => {
     runs.push(e.argv)
@@ -57,12 +58,12 @@ function engine(on: On, world: World = {}) {
   return { clock, runs }
 }
 
-function band($: Engine, surface: 'terminal' | 'desktop', isWorking = false) {
+function band($: Engine, surface: 'terminal' | 'desktop', isWorking = false, bodyColumns = PROPS.bodyColumns) {
   return $.ui.mount({
     plugin: 'usage-band',
     surface,
     component: 'AbovePrompt',
-    props: { ...PROPS, isWorking },
+    props: { ...PROPS, isWorking, bodyColumns },
   })
 }
 
@@ -95,6 +96,19 @@ group('format', () => {
     expect(tokens(1000000)).toBe('1M')
     expect(tokens(200000)).toBe('200k')
   })
+  test('cells and spans', () => {
+    expect(cells('Session')).toBe(7)
+    expect(cells('세션 한도')).toBe(9)
+    expect(cells('🔄')).toBe(2)
+    expect(span({ key: 'five_hour', name: 'Session', percent: 21, detail: '/ resets in 1h 16m' })).toBe(30)
+    expect(span({ key: 'five_hour', name: 'Session' })).toBe(7)
+  })
+  test('columns', () => {
+    expect(columns([30, 43, 38, 24], 160)).toBe(0)
+    expect(columns([30, 43, 38, 24], 100)).toBe(2)
+    expect(columns([30, 43, 38, 24], 60)).toBe(1)
+    expect(columns([], 40)).toBe(0)
+  })
   test('korean detection', () => {
     expect(isKorean('ko_KR.UTF-8')).toBe(true)
     expect(isKorean('ko-KR')).toBe(true)
@@ -115,8 +129,8 @@ test('English band', async ($, on) => {
     for (const text of ['Session', '21%', '/ resets in 1h 16m', 'Weekly · All models', '3%', WEEKLY_EN, 'Weekly · Fable', 'Context', '11%', '/ 112k of 1M']) {
       expect(await ui.find({ type: 'Text', text })).toBeDefined()
     }
-    expect((await ui.find({ key: 'compact' }))?.props.label).toBe('Compact')
-    expect((await ui.find({ key: 'refresh' }))?.props.label).toBe('Refresh')
+    expect(await ui.find({ key: 'compact' })).toBeUndefined()
+    expect((await ui.find({ key: 'refresh' }))?.props.label).toBe('🔄')
     await ui.unmount()
   }
 })
@@ -130,8 +144,8 @@ test('Korean from the Claude Code language setting', async ($, on) => {
     for (const text of ['세션 한도', '/ 1시간 16분 후 재설정', '주간 · 모든 모델', WEEKLY_KO, '주간 · Fable', '컨텍스트', '/ 1M 중 112k']) {
       expect(await ui.find({ type: 'Text', text })).toBeDefined()
     }
-    expect((await ui.find({ key: 'compact' }))?.props.label).toBe('압축')
-    expect((await ui.find({ key: 'refresh' }))?.props.label).toBe('새로고침')
+    expect(await ui.find({ key: 'compact' })).toBeUndefined()
+    expect((await ui.find({ key: 'refresh' }))?.props.label).toBe('🔄')
     await ui.unmount()
   }
 })
@@ -160,8 +174,8 @@ test('Korean can be forced', { options: { language: 'ko' } }, async ($, on) => {
   await ui.unmount()
 })
 
-test('Compact compacts, and hides while a turn runs', async ($, on) => {
-  engine(on)
+test('Compact shows from 60% context, and hides while a turn runs', async ($, on) => {
+  engine(on, { context: { tokens: 650000, window: 1000000, percent: 65 } })
   let compacted = 0
   on('session.compact', () => {
     compacted += 1
@@ -177,6 +191,20 @@ test('Compact compacts, and hides while a turn runs', async ($, on) => {
     await busy.unmount()
   }
   expect(compacted).toBe(2)
+})
+
+test('the readings line up in columns when the band is narrow', async ($, on) => {
+  const { clock } = engine(on, { env: { LANG: 'en_US.UTF-8' } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  for (const surface of ['terminal', 'desktop'] as const) {
+    for (const [bodyColumns, width] of [[200, undefined], [100, '50%'], [60, '100%']] as const) {
+      const ui = await band($, surface, false, bodyColumns)
+      expect((await ui.find({ key: 'five_hour' }))?.props.width).toBe(width)
+      expect((await ui.find({ key: 'context' }))?.props.width).toBe(width)
+      await ui.unmount()
+    }
+  }
 })
 
 test('a measurement redraws the band on screen', async ($, on) => {

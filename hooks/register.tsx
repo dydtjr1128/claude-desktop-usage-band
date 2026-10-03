@@ -1,8 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Context, Lang, Limit } from '../types'
+import type { Context, Lang, Limit, Reading } from '../types'
 import {
+  cells,
+  columns,
   contextDetail,
   contextPercent,
   isExpired,
@@ -10,6 +12,7 @@ import {
   label,
   merge,
   resetText,
+  span,
   t,
   tone,
 } from './format'
@@ -25,6 +28,11 @@ const refreshing = atom({ plugin: 'usage-band', key: 'refreshing' } as const, fa
 const INTERVALS: Record<string, number> = { '5m': 5 * 60000, '15m': 15 * 60000 }
 // A /usage reading another session took this recently is used as it is
 const SHARED_FOR = 4 * 60000
+
+// Compact shows once the context is filling up
+const COMPACT_FROM = 60
+const REFRESH = '🔄'
+const REFRESHING = '⏳'
 
 type Shared = { at: number; limits: Limit[] }
 
@@ -171,34 +179,54 @@ export const register: Register = (on, options) => {
     const l = await read($, lang)
     const s = t(l)
     const ctxDetail = ctx ? contextDetail(ctx, l) : undefined
+    const readings: Reading[] = current.map(limit => {
+      const expired = isExpired(limit, at)
+      const when = expired ? s.expired : resetText(limit, at, l)
+      return {
+        key: limit.kind,
+        name: label(limit.kind, l),
+        percent: expired ? undefined : Math.round(limit.percentUsed),
+        detail: when ? `/ ${when}` : undefined,
+      }
+    })
+    if (ctxPercent !== undefined) {
+      readings.push({ key: 'context', name: s.context, percent: ctxPercent, detail: ctxDetail ? `/ ${ctxDetail}` : undefined })
+    }
+    const compact = ctxPercent !== undefined && ctxPercent >= COMPACT_FROM && !e.props.isWorking
+    // The buttons and the gaps around them come off the band's width
+    const room = e.props.bodyColumns - (compact ? cells(s.compact) + 5 : 0) - cells(REFRESH) - 3
+    const cols = columns(readings.map(span), room)
+    const perRow = cols || Math.max(1, readings.length)
+    const rows: Reading[][] = []
+    for (let i = 0; i < readings.length; i += perRow) rows.push(readings.slice(i, i + perRow))
     const { Box, Button, Text } = $.ui.resolve(e)
 
-    // The readings wrap on the left; the buttons keep the right edge
+    // One row when everything fits, else equal columns so that wrapped rows
+    // line up; the buttons keep the right edge either way
     return (
       <Box flexDirection="row" alignItems="center" columnGap={3}>
-        <Box flexDirection="row" flexWrap="wrap" flexGrow={1} columnGap={3} alignItems="center">
-          {current.map(limit => {
-            const expired = isExpired(limit, at)
-            const pct = Math.round(limit.percentUsed)
-            const when = expired ? s.expired : resetText(limit, at, l)
-            return (
-              <Box key={limit.kind} flexDirection="row" columnGap={1}>
-                <Text>{label(limit.kind, l)}</Text>
-                {expired ? null : <Text bold color={tone(pct)}>{`${pct}%`}</Text>}
-                {when ? <Text dimColor>{`/ ${when}`}</Text> : null}
-              </Box>
-            )
-          })}
-          {ctxPercent !== undefined ? (
-            <Box key="context" flexDirection="row" columnGap={1}>
-              <Text>{s.context}</Text>
-              <Text bold color={tone(ctxPercent)}>{`${ctxPercent}%`}</Text>
-              {ctxDetail ? <Text dimColor>{`/ ${ctxDetail}`}</Text> : null}
+        <Box flexDirection="column" flexGrow={1}>
+          {rows.map((row, i) => (
+            <Box key={`row-${i}`} flexDirection="row" flexWrap="wrap" columnGap={cols ? 0 : 3}>
+              {row.map(reading => (
+                <Box
+                  key={reading.key}
+                  flexDirection="row"
+                  columnGap={1}
+                  {...(cols ? { width: `${100 / cols}%`, paddingRight: 3 } : {})}
+                >
+                  <Text>{reading.name}</Text>
+                  {reading.percent === undefined ? null : (
+                    <Text bold color={tone(reading.percent)}>{`${reading.percent}%`}</Text>
+                  )}
+                  {reading.detail ? <Text dimColor>{reading.detail}</Text> : null}
+                </Box>
+              ))}
             </Box>
-          ) : null}
+          ))}
         </Box>
         <Box key="actions" flexDirection="row" flexShrink={0} columnGap={1}>
-          {ctxPercent === undefined || e.props.isWorking ? null : (
+          {compact ? (
             <Button
               key="compact"
               label={s.compact}
@@ -211,8 +239,8 @@ export const register: Register = (on, options) => {
                 }
               }}
             />
-          )}
-          <Button key="refresh" label={busy ? s.refreshing : s.refresh} onPress={() => refresh($, true)} />
+          ) : null}
+          <Button key="refresh" plain dimColor label={busy ? REFRESHING : REFRESH} onPress={() => refresh($, true)} />
         </Box>
       </Box>
     )

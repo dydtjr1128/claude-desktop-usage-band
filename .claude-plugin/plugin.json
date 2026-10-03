@@ -22,7 +22,7 @@
     "refresh": {
       "type": "string",
       "title": "Usage refresh",
-      "description": "How often a background claude -p /usage reads the per-model weekly limits; off reads them only when you press Refresh",
+      "description": "How often a background claude -p /usage reads the per-model weekly limits; off reads them only when you press 🔄",
       "default": "5m",
       "options": [
         "5m",
