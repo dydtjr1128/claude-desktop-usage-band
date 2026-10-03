@@ -12,7 +12,7 @@ const TEXT = {
     compact: 'Compact',
     elapsed: (p: number) => `${p}% elapsed`,
     resetsIn: (d: string) => `↻ in ${d}`,
-    resetting: '↻ now',
+    expired: 'reset · updates on next reply',
     units: ['d', 'h', 'm'],
   },
   ko: {
@@ -23,7 +23,7 @@ const TEXT = {
     compact: '압축',
     elapsed: (p: number) => `${p}% 경과`,
     resetsIn: (d: string) => `↻ ${d} 후`,
-    resetting: '↻ 곧',
+    expired: '재설정됨 · 다음 응답 때 갱신',
     units: ['일', '시간', '분'],
   },
 } as const
@@ -61,16 +61,23 @@ export function duration(ms: number, lang: Lang): string {
   return `${mins}${m}`
 }
 
+// The window has reset since the last reading, so its percent is stale
+export function isExpired(limit: Limit, now: number): boolean {
+  if (!limit.resetsAt) return false
+  const at = Date.parse(limit.resetsAt)
+  return !Number.isNaN(at) && at <= now
+}
+
 // "(74% elapsed; ↻ in 1h 16m)" / "(74% 경과; ↻ 1시간 16분 후)"
 export function detail(limit: Limit, now: number, lang: Lang): string | undefined {
   if (!limit.resetsAt) return undefined
   const s = t(lang)
   const left = Date.parse(limit.resetsAt) - now
-  if (Number.isNaN(left)) return undefined
-  const reset = left > 0 ? s.resetsIn(duration(left, lang)) : s.resetting
+  if (Number.isNaN(left) || left <= 0) return undefined
+  const reset = s.resetsIn(duration(left, lang))
   const span = windowMs(limit.kind)
   if (span === undefined) return `(${reset})`
-  const elapsed = Math.min(100, Math.max(0, Math.round(((span - Math.max(0, left)) / span) * 100)))
+  const elapsed = Math.min(100, Math.max(0, Math.round(((span - left) / span) * 100)))
   return `(${s.elapsed(elapsed)}; ${reset})`
 }
 
@@ -93,9 +100,10 @@ export function contextDetail(context: Context): string | undefined {
   return `${tokens(context.tokens)}/${tokens(context.window)}`
 }
 
+// Theme keys, so the colors stay readable on light and dark themes
 export function tone(percent: number): string | undefined {
-  if (percent >= 90) return 'red'
-  if (percent >= 70) return 'yellow'
+  if (percent >= 90) return 'error'
+  if (percent >= 70) return 'warning'
   return undefined
 }
 
