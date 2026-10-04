@@ -2,6 +2,8 @@
 
 Keeps the figures of the Claude desktop app's usage popover on screen, right above the Claude Code prompt, in the desktop app's Code tab and in the terminal, without hovering.
 
+![The band above the prompt in the Claude desktop app](img/band.png)
+
 ```
 Session 13% 1h3m   Weekly 4% 6d14h   Fable 0% 6d14h   Context 50%   ↻
 세션 13% 1h3m   주간 4% 6d14h   Fable 0% 6d14h   컨텍스트 65%   [압축] ↻
